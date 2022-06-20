@@ -1,3 +1,7 @@
+
+- 基于[LVI-SAM_detailed_comments
+](https://github.com/electech6/LVI-SAM_detailed_comments)进行了部分注释,并修改了部分注释
+
 # LVI-SAM
 
 This repository contains code for a lidar-visual-inertial odometry and mapping system, which combines the advantages of [LIO-SAM](https://github.com/TixiaoShan/LIO-SAM/tree/a246c960e3fca52b989abf888c8cf1fae25b7c25) and [Vins-Mono](https://github.com/HKUST-Aerial-Robotics/VINS-Mono) at a system level.
