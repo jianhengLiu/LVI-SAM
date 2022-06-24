@@ -1,6 +1,51 @@
 #include "utility.h"
 #include "lvi_sam/cloud_info.h"
 
+#include <livox_ros_driver/CustomMsg.h>
+
+// LIVOX AVIA
+#define IS_VALID(a) ((abs(a) > 1e8) ? true : false)
+enum E_jump
+{
+    Nr_nor,
+    Nr_zero,
+    Nr_180,
+    Nr_inf,
+    Nr_blind
+};
+enum Feature
+{
+    Nor,
+    Poss_Plane,
+    Real_Plane,
+    Edge_Jump,
+    Edge_Plane,
+    Wire,
+    ZeroPoint
+};
+enum Surround
+{
+    Prev,
+    Next
+};
+struct orgtype
+{
+    double  range;
+    double  dista;
+    double  angle[2];
+    double  intersect;
+    E_jump  edj[2];
+    Feature ftype;
+    orgtype()
+    {
+        range     = 0;
+        edj[Prev] = Nr_nor;
+        edj[Next] = Nr_nor;
+        ftype     = Nor;
+        intersect = 2;
+    }
+};
+
 // Velodyne
 struct PointXYZIRT
 {
@@ -55,8 +100,8 @@ private:
     ros::Subscriber                subOdom;
     std::deque<nav_msgs::Odometry> odomQueue;
 
-    std::deque<sensor_msgs::PointCloud2> cloudQueue;
-    sensor_msgs::PointCloud2             currentCloudMsg;
+    std::deque<sensor_msgs::PointCloud2>    cloudQueue;
+    std::deque<livox_ros_driver::CustomMsg> livoxCloudQueue;
 
     double *imuTime = new double[queueLength];
     double *imuRotX = new double[queueLength];  // 依据陀螺仪前推结果，没有考虑bias和noise
@@ -84,17 +129,37 @@ private:
     double              timeScanNext;  // 最新scan时间戳
     std_msgs::Header    cloudHeader;
 
+    vector<int> columnIdnCountVec;  // for livox
+
 public:
     ImageProjection() : deskewFlag(0)
     {
+        ROS_INFO("\033[1;32m Subscribe to IMU Topic: %s.\033[0m", imuTopic.c_str());
         subImu  = nh.subscribe<sensor_msgs::Imu>(imuTopic, 2000, &ImageProjection::imuHandler, this,
                                                 ros::TransportHints().tcpNoDelay());
         subOdom = nh.subscribe<nav_msgs::Odometry>(
             PROJECT_NAME + "/vins/odometry/imu_propagate_ros", 2000,
             &ImageProjection::odometryHandler, this, ros::TransportHints().tcpNoDelay());
-        subLaserCloud = nh.subscribe<sensor_msgs::PointCloud2>(pointCloudTopic, 5,
-                                                               &ImageProjection::cloudHandler, this,
-                                                               ros::TransportHints().tcpNoDelay());
+
+        switch (lidarType)
+        {
+            ROS_INFO("\033[1;32m Lidar Type: %s.\033[0m", lidarType == VELO16 ? "VELO16" : "AVIA");
+            ROS_INFO("\033[1;32m Subscribe to Lidar Topic: %s.\033[0m", pointCloudTopic.c_str());
+            case VELO16:
+                subLaserCloud = nh.subscribe<sensor_msgs::PointCloud2>(
+                    pointCloudTopic, 5, &ImageProjection::velo16CloudHandler, this,
+                    ros::TransportHints().tcpNoDelay());
+                break;
+            case AVIA:
+                subLaserCloud = nh.subscribe<livox_ros_driver::CustomMsg>(
+                    pointCloudTopic, 5, &ImageProjection::aviaCloudHandler, this,
+                    ros::TransportHints().tcpNoDelay());
+                break;
+            default:
+                printf("Lidar type is wrong.\n");
+                exit(0);
+                break;
+        }
 
         pubExtractedCloud = nh.advertise<sensor_msgs::PointCloud2>(
             PROJECT_NAME + "/lidar/deskew/cloud_deskewed", 5);
@@ -142,6 +207,8 @@ public:
             imuRotY[i] = 0;
             imuRotZ[i] = 0;
         }
+
+        columnIdnCountVec.assign(N_SCAN, 0);
     }
 
     ~ImageProjection() {}
@@ -151,6 +218,25 @@ public:
         sensor_msgs::Imu            thisImu = imuConverter(*imuMsg);
         std::lock_guard<std::mutex> lock1(imuLock);
         imuQueue.push_back(thisImu);
+        // cout << "thisImu.header.stamp.toSec() = " << to_string(thisImu.header.stamp.toSec())
+        //      << endl;
+
+        // debug IMU data
+        // cout << std::setprecision(6);
+        // cout << "IMU acc: " << endl;
+        // cout << "x: " << thisImu.linear_acceleration.x << ", y: " <<
+        // thisImu.linear_acceleration.y
+        //      << ", z: " << thisImu.linear_acceleration.z << endl;
+        // cout << "IMU gyro: " << endl;
+        // cout << "x: " << thisImu.angular_velocity.x << ", y: " << thisImu.angular_velocity.y
+        //      << ", z: " << thisImu.angular_velocity.z << endl;
+        // double         imuRoll, imuPitch, imuYaw;
+        // tf::Quaternion orientation;
+        // tf::quaternionMsgToTF(thisImu.orientation, orientation);
+        // tf::Matrix3x3(orientation).getRPY(imuRoll, imuPitch, imuYaw);
+        // cout << "IMU roll pitch yaw: " << endl;
+        // cout << "roll: " << imuRoll << ", pitch: " << imuPitch << ", yaw: " << imuYaw << endl
+        //      << endl;
     }
 
     void odometryHandler(const nav_msgs::Odometry::ConstPtr &odometryMsg)
@@ -159,7 +245,28 @@ public:
         odomQueue.push_back(*odometryMsg);
     }
 
-    void cloudHandler(const sensor_msgs::PointCloud2ConstPtr &laserCloudMsg)
+    void velo16CloudHandler(const sensor_msgs::PointCloud2ConstPtr &laserCloudMsg)
+    {
+        // 1 检查队列里面的点云数量是否满足要求 并做一些前置操作
+        if (!cachePointCloud(laserCloudMsg))
+            return;
+
+        // 2 储存最新和次次新scan间的IMU和VO信息
+        if (!deskewInfo())
+            return;
+
+        // 3 获取雷达深度图；点云去畸变
+        projectPointCloud();
+
+        // 4 点云提取
+        cloudExtraction();
+
+        publishClouds();
+
+        resetParameters();
+    }
+
+    void aviaCloudHandler(const livox_ros_driver::CustomMsg::ConstPtr &laserCloudMsg)
     {
         // 1 检查队列里面的点云数量是否满足要求 并做一些前置操作
         if (!cachePointCloud(laserCloudMsg))
@@ -185,19 +292,15 @@ public:
     {
         // cache point cloud
         cloudQueue.push_back(*laserCloudMsg);
-        //队列里面的点云数量小于3->LO的每次迭代都会使用到最近三帧的点云数据；
-        //对应单帧数据无法提供足够点云提取特征？
         if (cloudQueue.size() <= 2)
             return false;
-        else
-        {
-            currentCloudMsg = cloudQueue.front();
-            cloudQueue.pop_front();
 
-            cloudHeader  = currentCloudMsg.header;
-            timeScanCur  = cloudHeader.stamp.toSec();
-            timeScanNext = cloudQueue.front().header.stamp.toSec();
-        }
+        sensor_msgs::PointCloud2 currentCloudMsg = cloudQueue.front();
+        cloudQueue.pop_front();
+
+        cloudHeader  = currentCloudMsg.header;
+        timeScanCur  = cloudHeader.stamp.toSec();
+        timeScanNext = cloudQueue.front().header.stamp.toSec();
 
         // convert cloud
         pcl::fromROSMsg(currentCloudMsg, *laserCloudIn);
@@ -256,6 +359,53 @@ public:
         return true;
     }
 
+    //队列里面的点云数量是否满足要求
+    bool cachePointCloud(const livox_ros_driver::CustomMsg::ConstPtr &laserCloudMsg)
+    {
+        // cache point cloud
+        livoxCloudQueue.push_back(*laserCloudMsg);
+        if (livoxCloudQueue.size() <= 2)
+            return false;
+
+        livox_ros_driver::CustomMsg currentCloudMsg = livoxCloudQueue.front();
+        livoxCloudQueue.pop_front();
+
+        cloudHeader  = currentCloudMsg.header;
+        timeScanCur  = cloudHeader.stamp.toSec();
+        timeScanNext = livoxCloudQueue.front().header.stamp.toSec();
+        // timeScanNext =
+        //     timeScanCur + 1e-9 * static_cast<double>(currentCloudMsg.points.back().offset_time);
+        // ;
+        for (int i = 0; i < currentCloudMsg.point_num; i++)
+        {
+            if ((currentCloudMsg.points[i].line < N_SCAN) &&
+                (!IS_VALID(currentCloudMsg.points[i].x)) &&
+                (!IS_VALID(currentCloudMsg.points[i].y)) &&
+                (!IS_VALID(currentCloudMsg.points[i].z)) && currentCloudMsg.points[i].x > 0.7)
+            {
+                // https://github.com/Livox-SDK/Livox-SDK/wiki/Livox-SDK-Communication-Protocol
+                // See [3.4 Tag Information]
+                if ((currentCloudMsg.points[i].x > 2.0) &&
+                    (((currentCloudMsg.points[i].tag & 0x03) != 0x00) ||
+                     ((currentCloudMsg.points[i].tag & 0x0C) != 0x00)))
+                {
+                    // Remove the bad quality points
+                    continue;
+                }
+                PointXYZIRT point;
+                point.x         = currentCloudMsg.points[i].x;
+                point.y         = currentCloudMsg.points[i].y;
+                point.z         = currentCloudMsg.points[i].z;
+                point.intensity = currentCloudMsg.points[i].reflectivity;
+                point.ring      = currentCloudMsg.points[i].line;
+                point.time      = currentCloudMsg.points[i].offset_time;
+                laserCloudIn->push_back(point);
+            }
+        }
+
+        return true;
+    }
+
     bool deskewInfo()
     {
         std::lock_guard<std::mutex> lock1(imuLock);
@@ -265,6 +415,12 @@ public:
         if (imuQueue.empty() || imuQueue.front().header.stamp.toSec() > timeScanCur ||
             imuQueue.back().header.stamp.toSec() < timeScanNext)
         {
+            // cout << "imuQueue.front().header.stamp.toSec()="
+            //      << to_string(imuQueue.front().header.stamp.toSec()) << endl;
+            // cout << "imuQueue.back().header.stamp.toSec()="
+            //      << to_string(imuQueue.back().header.stamp.toSec()) << endl;
+            // cout << "timeScanCur=" << to_string(timeScanCur) << endl;
+            // cout << "timeScanNext=" << to_string(timeScanNext) << endl;
             ROS_DEBUG("Waiting for IMU data ...");
             return false;
         }
@@ -567,15 +723,24 @@ public:
             if (rowIdn % downsampleRate != 0)
                 continue;
 
-            // 计算该点水平角
-            float horizonAngle = atan2(thisPoint.x, thisPoint.y) * 180 / M_PI;
-            // 计算分辨率(°)
-            static float ang_res_x = 360.0 / float(Horizon_SCAN);
-            // 获得该点对应图像columnId
-            // 图像上的中心的左边对应y轴正方向,所以有负号
-            int columnIdn = -round((horizonAngle - 90.0) / ang_res_x) + Horizon_SCAN / 2;
-            if (columnIdn >= Horizon_SCAN)
-                columnIdn -= Horizon_SCAN;
+            int columnIdn = -1;
+            if (lidarType == VELO16)
+            {
+                // 计算该点水平角
+                float horizonAngle = atan2(thisPoint.x, thisPoint.y) * 180 / M_PI;
+                // 计算分辨率(°)
+                static float ang_res_x = 360.0 / float(Horizon_SCAN);
+                // 获得该点对应图像columnId
+                // 图像上的中心的左边对应y轴正方向,所以有负号
+                columnIdn = -round((horizonAngle - 90.0) / ang_res_x) + Horizon_SCAN / 2;
+                if (columnIdn >= Horizon_SCAN)
+                    columnIdn -= Horizon_SCAN;
+            }
+            else if (lidarType == AVIA)
+            {
+                columnIdn = columnIdnCountVec[rowIdn];
+                columnIdnCountVec[rowIdn]++;
+            }
 
             if (columnIdn < 0 || columnIdn >= Horizon_SCAN)
                 continue;
@@ -639,7 +804,7 @@ public:
         cloudInfo.header = cloudHeader;
         cloudInfo.cloud_deskewed =
             publishCloud(&pubExtractedCloud, extractedCloud, cloudHeader.stamp, "base_link");
-        pubLaserCloudInfo.publish(cloudInfo);
+        pubLaserCloudInfo.publish(cloudInfo); // TODO: ??? 怎么cloudInfo里面也有完整的点云信息？
     }
 };
 

@@ -57,6 +57,13 @@
 using namespace std;
 
 typedef pcl::PointXYZI PointType;
+// typedef pcl::PointXYZINormal PointType;
+
+enum LID_TYPE
+{
+    VELO16,
+    AVIA
+};
 
 class ParamServer
 {
@@ -67,6 +74,7 @@ public:
 
     std::string robot_id;
 
+    int    lidarType;
     string pointCloudTopic;
     string imuTopic;
     string odomTopic;
@@ -74,6 +82,7 @@ public:
 
     // GPS Settings
     bool  useImuHeadingInitialization;
+    bool  useImuMagnetometer;
     bool  useGpsElevation;
     float gpsCovThreshold;
     float poseCovThreshold;
@@ -145,6 +154,7 @@ public:
 
         nh.param<std::string>("/robot_id", robot_id, "roboat");
 
+        nh.param<int>(PROJECT_NAME + "/lidarType", lidarType, 0);
         nh.param<std::string>(PROJECT_NAME + "/pointCloudTopic", pointCloudTopic, "points_raw");
         nh.param<std::string>(PROJECT_NAME + "/imuTopic", imuTopic, "imu_correct");
         nh.param<std::string>(PROJECT_NAME + "/odomTopic", odomTopic, "odometry/imu");
@@ -152,6 +162,7 @@ public:
 
         nh.param<bool>(PROJECT_NAME + "/useImuHeadingInitialization", useImuHeadingInitialization,
                        false);
+        nh.param<bool>(PROJECT_NAME + "/useImuMagnetometer", useImuMagnetometer, false);
         nh.param<bool>(PROJECT_NAME + "/useGpsElevation", useGpsElevation, false);
         nh.param<float>(PROJECT_NAME + "/gpsCovThreshold", gpsCovThreshold, 2.0);
         nh.param<float>(PROJECT_NAME + "/poseCovThreshold", poseCovThreshold, 25.0);
@@ -230,7 +241,7 @@ public:
         // rotate acceleration
         Eigen::Vector3d acc(imu_in.linear_acceleration.x, imu_in.linear_acceleration.y,
                             imu_in.linear_acceleration.z);
-        acc                           = extRot * acc;
+        acc                           = extRot * acc;  // TODO: 分析extRot作用
         imu_out.linear_acceleration.x = acc.x();
         imu_out.linear_acceleration.y = acc.y();
         imu_out.linear_acceleration.z = acc.z();
@@ -242,20 +253,36 @@ public:
         imu_out.angular_velocity.y = gyr.y();
         imu_out.angular_velocity.z = gyr.z();
         // rotate roll pitch yaw
-        Eigen::Quaterniond q_from(imu_in.orientation.w, imu_in.orientation.x, imu_in.orientation.y,
-                                  imu_in.orientation.z);
-        Eigen::Quaterniond q_final = q_from * extQRPY;
-        imu_out.orientation.x      = q_final.x();
-        imu_out.orientation.y      = q_final.y();
-        imu_out.orientation.z      = q_final.z();
-        imu_out.orientation.w      = q_final.w();
-
-        if (sqrt(q_final.x() * q_final.x() + q_final.y() * q_final.y() + q_final.z() * q_final.z() +
-                 q_final.w() * q_final.w()) < 0.1)
+        Eigen::Quaterniond q_final;
+        if (useImuMagnetometer && (sqrt(imu_in.orientation.x * imu_in.orientation.x +
+                                        imu_in.orientation.y * imu_in.orientation.y +
+                                        imu_in.orientation.z * imu_in.orientation.z +
+                                        imu_in.orientation.w * imu_in.orientation.w) > 0.1))
         {
-            ROS_ERROR("Invalid quaternion, please use a 9-axis IMU!");
-            ros::shutdown();
+            // extQRPY -> /extrinsicTrans
+            Eigen::Quaterniond q_from(imu_in.orientation.w, imu_in.orientation.x,
+                                      imu_in.orientation.y, imu_in.orientation.z);
+            q_final = q_from * extQRPY;
         }
+        else
+        {
+            if (useImuMagnetometer)
+                useImuMagnetometer = false;
+            // ROS_ERROR("Invalid quaternion, please use a 9-axis IMU!");
+            // ros::shutdown();
+            // q_final = extQRPY;
+
+            // 直接依据最大向量作为重力向量，粗略恢复姿态
+            // TODO: 后续根据需要可以修改为VINS联合初始化的方法；虽然可能没什么必要，因为这个值只用于第一帧位姿初值；除非开始阶段运动非常激烈
+            Eigen::Vector3d ng1 = acc.normalized();
+            Eigen::Vector3d ng2{0, 0, 1.0};
+            q_final = Eigen::Quaterniond::FromTwoVectors(ng1, ng2);
+        }
+
+        imu_out.orientation.x = q_final.x();
+        imu_out.orientation.y = q_final.y();
+        imu_out.orientation.z = q_final.z();
+        imu_out.orientation.w = q_final.w();
 
         return imu_out;
     }

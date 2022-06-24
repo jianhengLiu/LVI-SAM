@@ -3,9 +3,9 @@ PROJECT_NAME: "lvi_sam"
 
 lvi_sam:
   # Topics
-  lidarType: 0 # 0 for Velodyne  VLP-16,1 for Livox-avia
-  pointCloudTopic: "/points_raw" # Point cloud data
-  imuTopic: "/imu_raw" # IMU data
+  lidarType: 1 # 0 for Velodyne  VLP-16,1 for Livox-avia
+  pointCloudTopic: "/livox/lidar" # Point cloud data
+  imuTopic: "/livox/imu" # IMU data
 
   # Heading
   useImuHeadingInitialization: false # if using GPS data, set to "true"
@@ -16,8 +16,8 @@ lvi_sam:
   savePCDDirectory: "/Downloads/LOAM/" # in your home folder, starts and ends with "/". Warning: the code deletes "LOAM" folder then recreates it. See "mapOptimization" for implementation
 
   # Sensor Settings
-  N_SCAN: 16 # number of lidar channel (i.e., 16, 32, 64, 128)
-  Horizon_SCAN: 1800 # lidar horizontal resolution (Velodyne:1800, Ouster:512,1024,2048)
+  N_SCAN: 6 # number of lidar channel (i.e., 16, 32, 64, 128) livox avia (6)
+  Horizon_SCAN: 4000 # lidar horizontal resolution (Velodyne:1800, Ouster:512,1024,2048, Livox AVIA/Horizon:4000)
   timeField: "time" # point timestamp field, Velodyne - "time", Ouster - "t"
   downsampleRate: 1 # default: 1. Downsample your data if too many points. i.e., 16 = 64 / 4, 16 = 16 / 1
 
@@ -29,14 +29,16 @@ lvi_sam:
   imuGravity: 9.80511
 
   # Extrinsics (lidar -> IMU)
-  extrinsicTrans: [0.0, 0.0, 0.0]
-  extrinsicRot: [-1, 0, 0, 0, 1, 0, 0, 0, -1]
-  extrinsicRPY: [0, 1, 0, -1, 0, 0, 0, 0, 1]
+  extrinsicTrans: [0.04165, 0.02326, -0.0284]
+  extrinsicRot: [1, 0, 0, 0, 1, 0, 0, 0, 1]
+  # extrinsicRot: [-1, 0, 0, 0, 1, 0, 0, 0, -1]
+  extrinsicRPY: [1, 0, 0, 0, 1, 0, 0, 0, 1]
+  # extrinsicRPY: [0, 1, 0, -1, 0, 0, 0, 0, 1] # 这个究竟有什么用
 
   # LOAM feature threshold
   edgeThreshold: 1.0
   surfThreshold: 0.1
-  edgeFeatureMinValidNum: 10
+  edgeFeatureMinValidNum: 1
   surfFeatureMinValidNum: 100
 
   # voxel filter paprams
