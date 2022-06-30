@@ -109,6 +109,7 @@ public:
             return depth_of_point;
 
         // 0.3 look up transform at current image time
+        // T_W_I
         try
         {
             listener.waitForTransform("vins_world", "vins_body_ros", stamp_cur,
@@ -131,6 +132,7 @@ public:
             pcl::getTransformation(xCur, yCur, zCur, rollCur, pitchCur, yawCur);
 
         // 0.4 transform cloud from global frame to camera frame
+        // 实际是转换到了imu frame
         pcl::PointCloud<PointType>::Ptr depth_cloud_local(new pcl::PointCloud<PointType>());
         pcl::transformPointCloud(*depthCloud, *depth_cloud_local, transNow.inverse());
 
@@ -144,9 +146,14 @@ public:
             feature_cur.normalize();
             // convert to ROS standard
             PointType p;
+            // TODO: 能不能统一坐标啊，别自己乱换啊：相机坐标系是z轴朝前，他这里自行变换了相机坐标系
             p.x         = feature_cur(2);
             p.y         = -feature_cur(0);
             p.z         = -feature_cur(1);
+
+            // p.x         = feature_cur(0);
+            // p.y         = feature_cur(1);
+            // p.z         = feature_cur(2);
             p.intensity = -1;  // intensity will be used to save depth
             features_3d_sphere->push_back(p);
         }
@@ -180,8 +187,6 @@ public:
                 pointsArray[row_id][col_id]          = p;
             }
         }
-        // cv::imshow("rangeImage", rangeImage);
-        // cv::waitKey(1);
 
         // 4. extract downsampled depth cloud from range image
         pcl::PointCloud<PointType>::Ptr depth_cloud_local_filter2(new pcl::PointCloud<PointType>());
@@ -225,6 +230,7 @@ public:
                                    pointSearchSqDis);
             if (pointSearchInd.size() == 3 && pointSearchSqDis[2] < dist_sq_threshold)
             {
+                // 恢复搜索出的近邻点的深度（三维坐标）
                 float           r1 = depth_cloud_unit_sphere->points[pointSearchInd[0]].intensity;
                 Eigen::Vector3f A(depth_cloud_unit_sphere->points[pointSearchInd[0]].x * r1,
                                   depth_cloud_unit_sphere->points[pointSearchInd[0]].y * r1,

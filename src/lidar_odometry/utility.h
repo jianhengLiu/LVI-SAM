@@ -235,13 +235,14 @@ public:
         usleep(100);
     }
 
+    // 将加速度数据转换到lidar坐标系下
     sensor_msgs::Imu imuConverter(const sensor_msgs::Imu &imu_in)
     {
         sensor_msgs::Imu imu_out = imu_in;
         // rotate acceleration
         Eigen::Vector3d acc(imu_in.linear_acceleration.x, imu_in.linear_acceleration.y,
                             imu_in.linear_acceleration.z);
-        acc                           = extRot * acc;  // TODO: 分析extRot作用
+        acc = extRot * acc;  // TODO: 分析extRot作用： 将加速度数据转换到lidar坐标系下
         imu_out.linear_acceleration.x = acc.x();
         imu_out.linear_acceleration.y = acc.y();
         imu_out.linear_acceleration.z = acc.z();

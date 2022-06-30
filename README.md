@@ -1,6 +1,12 @@
+# Modification
 
-- 基于[LVI-SAM_detailed_comments
-](https://github.com/electech6/LVI-SAM_detailed_comments)进行了部分注释,并修改了部分注释
+- enable LIVOX AVIA
+- enable 6-axis IMU
+  - give initial orientation according to instant acceleration and gravity (could be further improved)
+  - give initial guess by last result（or constant velocity model）when vins is unavailable (the original guess orientatino by magnetometer, which requires 9-axis IMU)
+- unify extrinsic parameter
+- CommentsbBased on [LVI-SAM_detailed_comments
+](https://github.com/electech6/LVI-SAM_detailed_comments).
 
 # LVI-SAM
 

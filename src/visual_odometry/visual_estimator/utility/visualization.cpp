@@ -1,6 +1,7 @@
 #include "visualization.h"
 #include "tf/LinearMath/Quaternion.h"
 #include "tf/transform_datatypes.h"
+#include <Eigen/src/Geometry/Quaternion.h>
 
 using namespace ros;
 using namespace Eigen;
@@ -78,6 +79,7 @@ void pubLatestOdometry(const Eigen::Vector3d &P, const Eigen::Quaterniond &Q,
         return;
 
     // imu odometry in camera frame
+    //这里的 PQV 是 T_W_I
     nav_msgs::Odometry odometry;
     odometry.header                  = header;
     odometry.header.frame_id         = "vins_world";
@@ -97,31 +99,48 @@ void pubLatestOdometry(const Eigen::Vector3d &P, const Eigen::Quaterniond &Q,
     // imu odometry in ROS format (change rotation), used for lidar odometry initial guess
     odometry.pose.covariance[0] = double(failureId);  // notify lidar odometry failure
 
-    tf::Quaternion q_odom_cam(Q.x(), Q.y(), Q.z(), Q.w());
-    // TODO: 这个外参变换又是什么回事
-    tf::Quaternion q_cam_to_lidar(0, 1, 0, 0); // mark: camera - lidar
-    // tf::Quaternion q_cam_to_lidar = tf::createQuaternionFromRPY(0.0, 0.0, 0.0);
-    tf::Quaternion q_odom_ros     = q_odom_cam * q_cam_to_lidar;
+    // tf::Quaternion q_odom_cam(Q.x(), Q.y(), Q.z(), Q.w());
+    // // TODO: 这个外参变换又是什么回事
+    // tf::Quaternion q_cam_to_lidar(0, 1, 0, 0);  // mark: camera - lidar
+    // tf::Quaternion q_odom_ros     = q_odom_cam * q_cam_to_lidar;
+    // modified:
+    tf::Quaternion q_lidar_to_imu = tf::createQuaternionFromRPY(L_I_RX, L_I_RY, L_I_RZ);
+    tf::Quaternion q_odom_imu(Q.x(), Q.y(), Q.z(), Q.w());
+    tf::Quaternion q_odom_ros = q_odom_imu * q_lidar_to_imu;
     tf::quaternionTFToMsg(q_odom_ros, odometry.pose.pose.orientation);
     pub_latest_odometry_ros.publish(odometry);
 
     // TF of camera in vins_world in ROS format (change rotation), used for depth registration
-    tf::Transform        t_w_body = tf::Transform(q_odom_ros, tf::Vector3(P.x(), P.y(), P.z()));
+    // tf::Transform        t_w_body = tf::Transform(q_odom_ros, tf::Vector3(P.x(), P.y(), P.z()));
+
+    // modified:
+    // 改为发布vins的imu到世界的变换：T_W_I
+    tf::Transform t_w_body =
+        tf::Transform(tf::Quaternion(Q.x(), Q.y(), Q.z(), Q.w()), tf::Vector3(P.x(), P.y(), P.z()));
     tf::StampedTransform trans_world_vinsbody_ros =
         tf::StampedTransform(t_w_body, header.stamp, "vins_world", "vins_body_ros");
     br.sendTransform(trans_world_vinsbody_ros);
 
+    // DONE: 下面这个好像没有卵用？ : 用于可视化发布T_worldlidar_worldvins
     if (ALIGN_CAMERA_LIDAR_COORDINATE)
     {
+        // static tf::Transform t_odom_world =
+        //     tf::Transform(tf::createQuaternionFromRPY(0, 0, M_PI), tf::Vector3(0, 0, 0));
+        // modified:
         static tf::Transform t_odom_world =
-            tf::Transform(tf::createQuaternionFromRPY(0, 0, M_PI), tf::Vector3(0, 0, 0));
+            tf::Transform(tf::createQuaternionFromRPY(0, 0, 0), tf::Vector3(0, 0, 0));
         if (header.stamp.toSec() - last_align_time > 1.0)
         {
             try
             {
                 tf::StampedTransform trans_odom_baselink;
                 listener.lookupTransform("odom", "base_link", ros::Time(0), trans_odom_baselink);
+                // t_odom_world = transformConversion(trans_odom_baselink) *
+                //                transformConversion(trans_world_vinsbody_ros).inverse();
+                // modified:
                 t_odom_world = transformConversion(trans_odom_baselink) *
+                               tf::Transform(tf::createQuaternionFromRPY(L_I_RX, L_I_RY, L_I_RZ),
+                                             tf::Vector3(L_I_TX, L_I_TY, L_I_TZ)) *
                                transformConversion(trans_world_vinsbody_ros).inverse();
                 last_align_time = header.stamp.toSec();
             }
@@ -133,7 +152,10 @@ void pubLatestOdometry(const Eigen::Vector3d &P, const Eigen::Quaterniond &Q,
     }
     else
     {
-        tf::Transform t_static =
+        // tf::Transform t_static =
+        //     tf::Transform(tf::createQuaternionFromRPY(0, 0, M_PI), tf::Vector3(0, 0, 0));
+        // modified:
+        static tf::Transform t_static =
             tf::Transform(tf::createQuaternionFromRPY(0, 0, M_PI), tf::Vector3(0, 0, 0));
         br.sendTransform(tf::StampedTransform(t_static, header.stamp, "odom", "vins_world"));
     }

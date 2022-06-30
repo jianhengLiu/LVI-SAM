@@ -69,12 +69,15 @@ public:
     int key                      = 1;
     int imuPreintegrationResetId = 0;
 
-    // TODO: 这里的旋转怎么又不考虑了？
+    // DONE: 这里的旋转怎么又不考虑了？: 因为imuConverter中已经把原始imu数据转到了lidar坐标系下了
     gtsam::Pose3 imu2Lidar = gtsam::Pose3(
         gtsam::Rot3(1, 0, 0, 0), gtsam::Point3(-extTrans.x(), -extTrans.y(), -extTrans.z()));
     gtsam::Pose3 lidar2Imu = gtsam::Pose3(gtsam::Rot3(1, 0, 0, 0),
                                           gtsam::Point3(extTrans.x(), extTrans.y(), extTrans.z()));
-    ;
+    // modified:
+    // gtsam::Pose3 lidar2Imu =
+    //     gtsam::Pose3(gtsam::Rot3(extRot), gtsam::Point3(extTrans.x(), extTrans.y(), extTrans.z()));
+    // gtsam::Pose3 imu2Lidar = lidar2Imu.inverse();
 
     IMUPreintegration()
     {
@@ -85,7 +88,7 @@ public:
         subOdometry = nh.subscribe<nav_msgs::Odometry>(PROJECT_NAME + "/lidar/mapping/odometry", 5,
                                                        &IMUPreintegration::odometryHandler, this,
                                                        ros::TransportHints().tcpNoDelay());
-        // 发布imu 里程计
+        // 发布imu频率的里程计（lidar坐标系T_W_L）
         pubImuOdometry = nh.advertise<nav_msgs::Odometry>("odometry/imu", 2000);
         pubImuPath     = nh.advertise<nav_msgs::Path>(PROJECT_NAME + "/lidar/imu/path", 1);
 
@@ -447,16 +450,25 @@ public:
         odometry.child_frame_id  = "odom_imu";
 
         // transform imu pose to ldiar
-        gtsam::Pose3 imuPose   = gtsam::Pose3(currentState.quaternion(), currentState.position());
-        gtsam::Pose3 lidarPose = imuPose.compose(imu2Lidar);
+        gtsam::Pose3 imuPose = gtsam::Pose3(currentState.quaternion(), currentState.position());
+        // modified: 输出修改为imu坐标系的位姿，而不是lidar坐标系的位姿
+        // gtsam::Pose3 lidarPose = imuPose.compose(imu2Lidar);
 
-        odometry.pose.pose.position.x    = lidarPose.translation().x();
-        odometry.pose.pose.position.y    = lidarPose.translation().y();
-        odometry.pose.pose.position.z    = lidarPose.translation().z();
-        odometry.pose.pose.orientation.x = lidarPose.rotation().toQuaternion().x();
-        odometry.pose.pose.orientation.y = lidarPose.rotation().toQuaternion().y();
-        odometry.pose.pose.orientation.z = lidarPose.rotation().toQuaternion().z();
-        odometry.pose.pose.orientation.w = lidarPose.rotation().toQuaternion().w();
+        // odometry.pose.pose.position.x    = lidarPose.translation().x();
+        // odometry.pose.pose.position.y    = lidarPose.translation().y();
+        // odometry.pose.pose.position.z    = lidarPose.translation().z();
+        // odometry.pose.pose.orientation.x = lidarPose.rotation().toQuaternion().x();
+        // odometry.pose.pose.orientation.y = lidarPose.rotation().toQuaternion().y();
+        // odometry.pose.pose.orientation.z = lidarPose.rotation().toQuaternion().z();
+        // odometry.pose.pose.orientation.w = lidarPose.rotation().toQuaternion().w();
+
+        odometry.pose.pose.position.x    = imuPose.translation().x();
+        odometry.pose.pose.position.y    = imuPose.translation().y();
+        odometry.pose.pose.position.z    = imuPose.translation().z();
+        odometry.pose.pose.orientation.x = imuPose.rotation().toQuaternion().x();
+        odometry.pose.pose.orientation.y = imuPose.rotation().toQuaternion().y();
+        odometry.pose.pose.orientation.z = imuPose.rotation().toQuaternion().z();
+        odometry.pose.pose.orientation.w = imuPose.rotation().toQuaternion().w();
 
         odometry.twist.twist.linear.x  = currentState.velocity().x();
         odometry.twist.twist.linear.y  = currentState.velocity().y();

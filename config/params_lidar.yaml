@@ -31,7 +31,7 @@ lvi_sam:
   # Extrinsics (lidar -> IMU)
   extrinsicTrans: [0.0, 0.0, 0.0]
   extrinsicRot: [-1, 0, 0, 0, 1, 0, 0, 0, -1]
-  extrinsicRPY: [0, 1, 0, -1, 0, 0, 0, 0, 1]
+  extrinsicRPY: [0, 1, 0, -1, 0, 0, 0, 0, 1] # not required if useImuMagnetometer: false
 
   # LOAM feature threshold
   edgeThreshold: 1.0

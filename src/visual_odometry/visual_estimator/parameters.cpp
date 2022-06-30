@@ -12,28 +12,34 @@ std::vector<Eigen::Vector3d> TIC;
 
 Eigen::Vector3d G{0.0, 0.0, 9.8};
 
-double BIAS_ACC_THRESHOLD;
-double BIAS_GYR_THRESHOLD;
-double SOLVER_TIME;
-int NUM_ITERATIONS;
-int ESTIMATE_EXTRINSIC;
-int ESTIMATE_TD;
-int ROLLING_SHUTTER;
+double      BIAS_ACC_THRESHOLD;
+double      BIAS_GYR_THRESHOLD;
+double      SOLVER_TIME;
+int         NUM_ITERATIONS;
+int         ESTIMATE_EXTRINSIC;
+int         ESTIMATE_TD;
+int         ROLLING_SHUTTER;
 std::string EX_CALIB_RESULT_PATH;
 std::string IMU_TOPIC;
-double ROW, COL;
-double TD, TR;
+double      ROW, COL;
+double      TD, TR;
+
+double L_I_TX;
+double L_I_TY;
+double L_I_TZ;
+double L_I_RX;
+double L_I_RY;
+double L_I_RZ;
 
 int USE_LIDAR;
 int ALIGN_CAMERA_LIDAR_COORDINATE;
-
 
 void readParameters(ros::NodeHandle &n)
 {
     std::string config_file;
     n.getParam("vins_config_file", config_file);
     cv::FileStorage fsSettings(config_file, cv::FileStorage::READ);
-    if(!fsSettings.isOpened())
+    if (!fsSettings.isOpened())
     {
         std::cerr << "ERROR: Wrong path to settings" << std::endl;
     }
@@ -46,19 +52,26 @@ void readParameters(ros::NodeHandle &n)
     fsSettings["use_lidar"] >> USE_LIDAR;
     fsSettings["align_camera_lidar_estimation"] >> ALIGN_CAMERA_LIDAR_COORDINATE;
 
-    SOLVER_TIME = fsSettings["max_solver_time"];
+    SOLVER_TIME    = fsSettings["max_solver_time"];
     NUM_ITERATIONS = fsSettings["max_num_iterations"];
-    MIN_PARALLAX = fsSettings["keyframe_parallax"];
-    MIN_PARALLAX = MIN_PARALLAX / FOCAL_LENGTH;
+    MIN_PARALLAX   = fsSettings["keyframe_parallax"];
+    MIN_PARALLAX   = MIN_PARALLAX / FOCAL_LENGTH;
 
     ACC_N = fsSettings["acc_n"];
     ACC_W = fsSettings["acc_w"];
     GYR_N = fsSettings["gyr_n"];
     GYR_W = fsSettings["gyr_w"];
     G.z() = fsSettings["g_norm"];
-    ROW = fsSettings["image_height"];
-    COL = fsSettings["image_width"];
+    ROW   = fsSettings["image_height"];
+    COL   = fsSettings["image_width"];
     ROS_INFO("Image dimention: ROW: %f COL: %f ", ROW, COL);
+
+    L_I_TX = fsSettings["lidar_to_imu_tx"];
+    L_I_TY = fsSettings["lidar_to_imu_ty"];
+    L_I_TZ = fsSettings["lidar_to_imu_tz"];
+    L_I_RX = fsSettings["lidar_to_imu_rx"];
+    L_I_RY = fsSettings["lidar_to_imu_ry"];
+    L_I_RZ = fsSettings["lidar_to_imu_rz"];
 
     ESTIMATE_EXTRINSIC = fsSettings["estimate_extrinsic"];
     if (ESTIMATE_EXTRINSIC == 2)
@@ -67,11 +80,10 @@ void readParameters(ros::NodeHandle &n)
         RIC.push_back(Eigen::Matrix3d::Identity());
         TIC.push_back(Eigen::Vector3d::Zero());
         EX_CALIB_RESULT_PATH = pkg_path + "/config/extrinsic_parameter.csv";
-
     }
-    else 
+    else
     {
-        if ( ESTIMATE_EXTRINSIC == 1)
+        if (ESTIMATE_EXTRINSIC == 1)
         {
             ROS_INFO(" Optimize extrinsic param around initial guess!");
             EX_CALIB_RESULT_PATH = pkg_path + "/config/extrinsic_parameter.csv";
@@ -92,14 +104,13 @@ void readParameters(ros::NodeHandle &n)
         TIC.push_back(eigen_T);
         ROS_INFO_STREAM("Extrinsic_R : " << std::endl << RIC[0]);
         ROS_INFO_STREAM("Extrinsic_T : " << std::endl << TIC[0].transpose());
-        
-    } 
+    }
 
-    INIT_DEPTH = 5.0;
+    INIT_DEPTH         = 5.0;
     BIAS_ACC_THRESHOLD = 0.1;
     BIAS_GYR_THRESHOLD = 0.1;
 
-    TD = fsSettings["td"];
+    TD          = fsSettings["td"];
     ESTIMATE_TD = fsSettings["estimate_td"];
     if (ESTIMATE_TD)
         ROS_INFO_STREAM("Unsynchronized sensors, online estimate time offset, initial td: " << TD);
@@ -116,7 +127,7 @@ void readParameters(ros::NodeHandle &n)
     {
         TR = 0;
     }
-    
+
     fsSettings.release();
     usleep(100);
 }

@@ -971,16 +971,10 @@ public:
                                                   transformTobeMapped[4], transformTobeMapped[5],
                                                   transformTobeMapped[0], transformTobeMapped[1],
                                                   transformTobeMapped[2]);
+                // 这个变量跟imu没有关系，只是用来记录上一次的位姿估计结果
+                lastImuTransformation = transBack;
 
-                lastImuTransformation =
-                    transBack;  // 这个变量跟imu没有关系，只是用来记录上一次的位姿估计结果
-
-                // 直接使用上一次优化的结果作为初值
-                // Eigen::Affine3f transFinal = trans2Affine3f(transformTobeMapped);
-                // pcl::getTranslationAndEulerAngles(transFinal, transformTobeMapped[3],
-                //                                   transformTobeMapped[4], transformTobeMapped[5],
-                //                                   transformTobeMapped[0], transformTobeMapped[1],
-                //                                   transformTobeMapped[2]);
+                // 直接使用上一次优化的结果作为初值: 把上面的都注释掉就好
             }
 
             return;
